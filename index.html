@@ -7,6 +7,28 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <!-- Inject saved Firebase config before module loads -->
 <script>
+  {
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyASg-WYbY8LazEBR41_a2gm-SH_XvZsgKM",
+    authDomain: "paisa-watch.firebaseapp.com",
+    projectId: "paisa-watch",
+    storageBucket: "paisa-watch.firebasestorage.app",
+    messagingSenderId: "229050469411",
+    appId: "1:229050469411:web:78a8f88c5a8d4a021fb596",
+    measurementId: "G-3HJ6MV2QEE"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+}
   try {
     const _cfg = localStorage.getItem('paisawatch_fbconfig');
     if (_cfg) window.__PAISA_FIREBASE_CONFIG__ = JSON.parse(_cfg);
