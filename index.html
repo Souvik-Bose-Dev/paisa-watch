@@ -915,20 +915,29 @@ function onFirebaseReady() {
     return;
   }
 
-  // Check if we're returning from a Google redirect sign-in
+  // Keep showing "Loading…" while we check redirect result first
+  // This prevents the login screen flashing before auth resolves
   fb.getRedirectResult()
     .then(result => {
-      // result.user will be set if returning from redirect, null otherwise
-      // Either way, onAuth below will handle the final state
-    })
-    .catch(err => {
-      if (err.code !== 'auth/no-current-user') {
-        toast('Sign-in error: ' + (err.message || err.code), true);
+      if (result && result.user) {
+        // Came back from Google redirect — user is now signed in
+        // onAuthStateChanged will fire next with this user
       }
     })
+    .catch(err => {
+      console.warn('Redirect result error (usually safe to ignore):', err.code);
+    })
     .finally(() => {
-      // Now listen for auth state — this fires after redirect result is processed
+      // NOW safe to start listening — redirect result is fully settled
+      let authResolved = false;
       fb.onAuth(async (user) => {
+        if (authResolved) {
+          // Subsequent auth changes (e.g. sign out)
+          if (!user) showAuthScreen('loginCard');
+          return;
+        }
+        authResolved = true;
+
         if (user) {
           try {
             const cloudState = await fb.loadData(user.uid);
@@ -955,14 +964,14 @@ window.__onFirebaseReady__ = onFirebaseReady;
 if (window.__FB_READY__) {
   onFirebaseReady();
 } else {
-  // Fallback: if module never fires (e.g. blocked, CSP issue), show setup after 4s
+  // Fallback: if module never fires (e.g. blocked, CSP issue), show setup after 8s
   setTimeout(() => {
     if (!window.__FB_READY__) {
       console.warn('Firebase module did not load in time');
       window.__FB_READY__ = true;
       onFirebaseReady();
     }
-  }, 4000);
+  }, 8000);
 }
 
 // ── App state variables ──
