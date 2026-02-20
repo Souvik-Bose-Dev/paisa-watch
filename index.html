@@ -21,7 +21,7 @@
 <!-- Firebase SDKs -->
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged }
+import { getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
@@ -37,7 +37,8 @@ if (FIREBASE_CONFIG) {
     const provider = new GoogleAuthProvider();
 
     window.__FB__ = {
-      signIn:   () => signInWithPopup(auth, provider),
+      signIn:   () => signInWithRedirect(auth, provider),
+      getRedirectResult: () => getRedirectResult(auth),
       signOut:  () => signOut(auth),
       onAuth:   (cb) => onAuthStateChanged(auth, cb),
       saveData: async (uid, data) => {
@@ -823,11 +824,17 @@ document.addEventListener('click', e => {
   }
 });
 
+let authInProgress = false;
+
 function doSignIn() {
-  if (!window.__FB__) return;
+  if (!window.__FB__ || authInProgress) return;
+  authInProgress = true;
+  const btn = document.querySelector('.google-btn');
+  if (btn) { btn.textContent = 'Redirecting to Google…'; btn.disabled = true; }
   window.__FB__.signIn().catch(err => {
-    console.error(err);
-    toast('Sign-in failed: ' + err.message, true);
+    authInProgress = false;
+    if (btn) { btn.textContent = 'Continue with Google'; btn.disabled = false; }
+    toast('Sign-in failed: ' + (err.message || err.code), true);
   });
 }
 
@@ -898,39 +905,49 @@ function onFirebaseReady() {
   const fb = window.__FB__;
 
   if (!fb) {
-    // No Firebase — check for saved config
     const savedCfg = localStorage.getItem(SK_CONFIG);
     if (savedCfg) {
-      // Config exists but module failed to load (e.g. offline) — show login with error
       showAuthScreen('loginCard');
       toast('⚠️ Could not reach Firebase. Check your connection.', true);
       return;
     }
-    // No config at all — show setup screen
     showAuthScreen('setupCard');
     return;
   }
 
-  // Firebase loaded — wait for auth state
-  fb.onAuth(async (user) => {
-    if (user) {
-      try {
-        const cloudState = await fb.loadData(user.uid);
-        if (cloudState) {
-          STATE = cloudState;
-          if (!STATE.accounts) STATE = defaultState();
-          localStorage.setItem(SK, JSON.stringify(STATE));
-        }
-      } catch(e) {
-        console.error('Firestore load error:', e);
-        toast('⚠️ Could not load cloud data, using local copy', true);
+  // Check if we're returning from a Google redirect sign-in
+  fb.getRedirectResult()
+    .then(result => {
+      // result.user will be set if returning from redirect, null otherwise
+      // Either way, onAuth below will handle the final state
+    })
+    .catch(err => {
+      if (err.code !== 'auth/no-current-user') {
+        toast('Sign-in error: ' + (err.message || err.code), true);
       }
-      showMainApp(user);
-      init();
-    } else {
-      showAuthScreen('loginCard');
-    }
-  });
+    })
+    .finally(() => {
+      // Now listen for auth state — this fires after redirect result is processed
+      fb.onAuth(async (user) => {
+        if (user) {
+          try {
+            const cloudState = await fb.loadData(user.uid);
+            if (cloudState) {
+              STATE = cloudState;
+              if (!STATE.accounts) STATE = defaultState();
+              localStorage.setItem(SK, JSON.stringify(STATE));
+            }
+          } catch(e) {
+            console.error('Firestore load error:', e);
+            toast('⚠️ Could not load cloud data, using local copy', true);
+          }
+          showMainApp(user);
+          init();
+        } else {
+          showAuthScreen('loginCard');
+        }
+      });
+    });
 }
 
 // Register callback — if module already fired, call immediately; otherwise wait
