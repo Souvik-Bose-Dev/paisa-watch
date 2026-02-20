@@ -18,4 +18,4 @@ window.__PAISA_FIREBASE_CONFIG__ = {
 
 // Paste your OAuth 2.0 Web Client ID here (ends in .apps.googleusercontent.com)
 // Get it from: console.cloud.google.com → APIs & Services → Credentials
-window.__PAISA_GSI_CLIENT_ID__ = "PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com";
+window.__PAISA_GSI_CLIENT_ID__ = "229050469411-eeggri1s7r71uvq7j0dkbh9bccvj2c38.apps.googleusercontent.com";
