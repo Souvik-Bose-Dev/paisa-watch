@@ -5,40 +5,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Paisa Watch</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-<!-- Firebase config — hardcoded directly so no setup screen needed -->
-<script>
-  window.__PAISA_FIREBASE_CONFIG__ = {
-    apiKey: "AIzaSyASg-WYbY8LazEBR41_a2gm-SH_XvZsgKM",
-    authDomain: "paisa-watch.firebaseapp.com",
-    projectId: "paisa-watch",
-    storageBucket: "paisa-watch.firebasestorage.app",
-    messagingSenderId: "229050469411",
-    appId: "1:229050469411:web:78a8f88c5a8d4a021fb596",
-    measurementId: "G-3HJ6MV2QEE"
-  };
-  try { localStorage.setItem('paisawatch_fbconfig', JSON.stringify(window.__PAISA_FIREBASE_CONFIG__)); } catch(e) {}
-</script>
-<!-- Firebase SDKs -->
+<!-- Config loaded from config.js (gitignored) — keeps API keys off GitHub -->
+<script src="config.js" onerror="window.__CONFIG_MISSING__=true"></script>
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async></script>
+<!-- Firebase SDKs (Firestore only, no Auth) -->
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged }
-  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, getDoc, setDoc }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged }
+  from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
 const FIREBASE_CONFIG = window.__PAISA_FIREBASE_CONFIG__ || null;
 window.__FB__ = null;
 
 if (FIREBASE_CONFIG) {
   try {
-    const app      = initializeApp(FIREBASE_CONFIG);
-    const auth     = getAuth(app);
-    const db       = getFirestore(app);
-    const provider = new GoogleAuthProvider();
+    const app  = initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app);
+    const db   = getFirestore(app);
 
     window.__FB__ = {
-      signIn:   () => signInWithRedirect(auth, provider),
-      getRedirectResult: () => getRedirectResult(auth),
+      signInWithGoogleToken: async (id_token) => {
+        const cred = GoogleAuthProvider.credential(id_token);
+        return signInWithCredential(auth, cred);
+      },
       signOut:  () => signOut(auth),
       onAuth:   (cb) => onAuthStateChanged(auth, cb),
       saveData: async (uid, data) => {
@@ -55,7 +47,6 @@ if (FIREBASE_CONFIG) {
   }
 }
 
-// Signal ready via callback — avoids event timing race
 window.__FB_READY__ = true;
 if (typeof window.__onFirebaseReady__ === 'function') window.__onFirebaseReady__();
 </script>
@@ -442,10 +433,10 @@ select.ec{cursor:pointer;}select.ec option{background:#1e1e1e;}
   <div id="loginCard" class="auth-card" style="display:none;">
     <div class="auth-logo"><div class="auth-logo-dot"></div>Paisa Watch</div>
     <div class="auth-tagline">Your personal finance tracker.<br>Sign in to sync your data across devices.</div>
-    <button class="google-btn" onclick="doSignIn()">
-      <svg class="google-icon" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-      Continue with Google
-    </button>
+    <!-- Google Identity Services button renders here -->
+    <div id="gsi-button-wrap" style="display:flex;justify-content:center;margin-bottom:10px;min-height:44px;">
+      <div id="gsi-button"></div>
+    </div>
     <div class="auth-note">Your data is stored privately under your Google account.<br>No one else can see your expenses.</div>
   </div>
 
@@ -824,32 +815,95 @@ document.addEventListener('click', e => {
   }
 });
 
-let authInProgress = false;
-
-function doSignIn() {
-  if (!window.__FB__ || authInProgress) return;
-  authInProgress = true;
-  const btn = document.querySelector('.google-btn');
-  if (btn) { btn.textContent = 'Redirecting to Google…'; btn.disabled = true; }
-  window.__FB__.signIn().catch(err => {
-    authInProgress = false;
-    if (btn) { btn.textContent = 'Continue with Google'; btn.disabled = false; }
-    toast('Sign-in failed: ' + (err.message || err.code), true);
-  });
+// ════════════════════════════════════════════════════════════
+//  GOOGLE IDENTITY SERVICES — callback when user picks account
+// ════════════════════════════════════════════════════════════
+async function handleGoogleCredential(response) {
+  if (!window.__FB__) return;
+  try {
+    document.getElementById('gsi-button-wrap').innerHTML =
+      '<div style="font-size:.75rem;color:var(--muted);padding:10px;">Signing in…</div>';
+    const userCred = await window.__FB__.signInWithGoogleToken(response.credential);
+    // onAuth listener below will handle showing the app
+  } catch(e) {
+    toast('Sign-in failed: ' + (e.message || e.code), true);
+    initGSI(); // re-render button
+  }
 }
+window.handleGoogleCredential = handleGoogleCredential;
+
+function initGSI() {
+  if (!window.google?.accounts?.id) {
+    setTimeout(initGSI, 500); return;
+  }
+  google.accounts.id.initialize({
+    // Get this from: console.cloud.google.com → APIs & Services → Credentials → OAuth 2.0 Client IDs → Web client → Client ID
+    client_id: window.__PAISA_GSI_CLIENT_ID__ || '',
+    callback: handleGoogleCredential,
+    auto_select: false,
+    cancel_on_tap_outside: false,
+  });
+  google.accounts.id.renderButton(
+    document.getElementById('gsi-button'),
+    { theme: 'outline', size: 'large', text: 'continue_with', width: 280 }
+  );
+}
+
+let authInProgress = false;
+function doSignIn() {} // no-op, GSI handles it
 
 function doSignOut() {
   if (!window.__FB__) return;
+  if (window.google?.accounts?.id) google.accounts.id.disableAutoSelect();
   window.__FB__.signOut().then(() => {
     currentUser = null; useFirestore = false;
     document.getElementById('userMenu').style.display = 'none';
     document.getElementById('userPill').style.display = 'none';
     showAuthScreen('loginCard');
+    setTimeout(initGSI, 300);
   });
 }
 
-// Config setup
-function applyConfig() {
+// ════════════════════════════════════════════════════════════
+//  FIREBASE ENTRY POINT
+// ════════════════════════════════════════════════════════════
+function onFirebaseReady() {
+  const fb = window.__FB__;
+
+  if (!fb) {
+    const savedCfg = localStorage.getItem(SK_CONFIG);
+    if (savedCfg) {
+      showAuthScreen('loginCard');
+      toast('⚠️ Could not reach Firebase. Check your connection.', true);
+      return;
+    }
+    showAuthScreen('setupCard');
+    return;
+  }
+
+  // Check if already signed in from a previous session
+  fb.onAuth(async (user) => {
+    if (user) {
+      try {
+        const cloudState = await fb.loadData(user.uid);
+        if (cloudState) {
+          STATE = cloudState;
+          if (!STATE.accounts) STATE = defaultState();
+          localStorage.setItem(SK, JSON.stringify(STATE));
+        }
+      } catch(e) {
+        console.error('Firestore load error:', e);
+        toast('⚠️ Could not load cloud data, using local copy', true);
+      }
+      showMainApp(user);
+      init();
+    } else {
+      showAuthScreen('loginCard');
+      // Init GSI button now that login card is visible
+      setTimeout(initGSI, 300);
+    }
+  });
+}
   const raw = document.getElementById('configInput').value.trim();
   try {
     // Accept the firebaseConfig object — strip any surrounding variable assignment if pasted
@@ -898,76 +952,13 @@ function save() {
   }, 800); // debounce 800ms so rapid changes batch together
 }
 
-// ════════════════════════════════════════════════════════════
-//  FIREBASE ENTRY POINT — callback pattern, avoids event race
-// ════════════════════════════════════════════════════════════
-function onFirebaseReady() {
-  const fb = window.__FB__;
-
-  if (!fb) {
-    const savedCfg = localStorage.getItem(SK_CONFIG);
-    if (savedCfg) {
-      showAuthScreen('loginCard');
-      toast('⚠️ Could not reach Firebase. Check your connection.', true);
-      return;
-    }
-    showAuthScreen('setupCard');
-    return;
-  }
-
-  // Keep showing "Loading…" while we check redirect result first
-  // This prevents the login screen flashing before auth resolves
-  fb.getRedirectResult()
-    .then(result => {
-      if (result && result.user) {
-        // Came back from Google redirect — user is now signed in
-        // onAuthStateChanged will fire next with this user
-      }
-    })
-    .catch(err => {
-      console.warn('Redirect result error (usually safe to ignore):', err.code);
-    })
-    .finally(() => {
-      // NOW safe to start listening — redirect result is fully settled
-      let authResolved = false;
-      fb.onAuth(async (user) => {
-        if (authResolved) {
-          // Subsequent auth changes (e.g. sign out)
-          if (!user) showAuthScreen('loginCard');
-          return;
-        }
-        authResolved = true;
-
-        if (user) {
-          try {
-            const cloudState = await fb.loadData(user.uid);
-            if (cloudState) {
-              STATE = cloudState;
-              if (!STATE.accounts) STATE = defaultState();
-              localStorage.setItem(SK, JSON.stringify(STATE));
-            }
-          } catch(e) {
-            console.error('Firestore load error:', e);
-            toast('⚠️ Could not load cloud data, using local copy', true);
-          }
-          showMainApp(user);
-          init();
-        } else {
-          showAuthScreen('loginCard');
-        }
-      });
-    });
-}
-
 // Register callback — if module already fired, call immediately; otherwise wait
 window.__onFirebaseReady__ = onFirebaseReady;
 if (window.__FB_READY__) {
   onFirebaseReady();
 } else {
-  // Fallback: if module never fires (e.g. blocked, CSP issue), show setup after 8s
   setTimeout(() => {
     if (!window.__FB_READY__) {
-      console.warn('Firebase module did not load in time');
       window.__FB_READY__ = true;
       onFirebaseReady();
     }
